@@ -167,7 +167,11 @@ class CameraSession(object):
         return struct.unpack_from('<I', payload)[0]
 
     def _init_event_channel(self):
-        body = self.guid + struct.pack('<I', self.session_id)
+        # Variante Nikon/WMU verificada contra airnef (mtpwifi.py sendInitEvents)
+        # y gphoto2 (ptpip_eventinit_size=12): SOLO session ID, sin GUID.
+        # El literal CIPA DC-007 (GUID+sessionID) es ignorado por el firmware
+        # WU-1a/S3700: no responde nada.
+        body = struct.pack('<I', self.session_id)
         send_frame(self._evt_sock, ptp.INIT_EVT_REQ, body)
         ptype, _ = recv_frame(self._evt_sock)
         if ptype != ptp.INIT_EVT_ACK:

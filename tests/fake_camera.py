@@ -157,6 +157,10 @@ class FakeCamera(object):
                         + enc_str('FakeNikon') + struct.pack('<I', 0x00010000)
                     send_frame(conn, ptp.INIT_CMD_ACK, ack)
                 elif ptype == ptp.INIT_EVT_REQ:
+                    # el firmware Nikon real (WU-1a/S3700, verificado contra
+                    # airnef y gphoto2) espera SOLO session ID, sin GUID
+                    if len(body) != 4:
+                        return  # lo ignora: cliente con formato DC-007 literal
                     send_frame(conn, ptp.INIT_EVT_ACK)
                 elif ptype == ptp.PROBE_REQ:
                     if self.skip_probe_response:
