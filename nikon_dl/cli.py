@@ -12,6 +12,8 @@ from .netdetect import detect_camera_ip
 from .objects import (
     human_size,
     list_all_objects,
+    list_objects,
+    list_storages,
     parse_deviceinfo,
 )
 from .session import (
@@ -54,6 +56,9 @@ def build_parser():
     p_list = sub.add_parser('list', help='enumera fotos/videos en la camara')
     p_list.add_argument('--json', dest='as_json', action='store_true',
                         help='salida JSON')
+    p_list.add_argument('--raw', action='store_true',
+                        help='diagnostico: incluye carpetas (association), '
+                             'muestra formato crudo y separa por storage')
 
     p_dl = sub.add_parser('download', help='descarga archivos al telefono')
     p_dl.add_argument('--out', '-o', type=Path, default=None,
@@ -106,24 +111,50 @@ def describe(obj):
 def cmd_list(args):
     holder, _ = connect_holder(args)
     try:
-        objects = list_all_objects(holder.current())
+        session = holder.current()
+        storages = list_storages(session)
+        if args.raw:
+            print('storages: %s'
+                  % ', '.join('0x%08X' % s for s in storages),
+                  file=sys.stderr)
+        per_storage = [(sid, list_objects(session, sid,
+                                          include_associations=args.raw))
+                       for sid in storages]
     finally:
         holder.close()
+    objects = [obj for _, objs in per_storage for obj in objs]
     if args.as_json:
         payload = [{'handle': '0x%08x' % o.handle, 'name': o.filename,
-                    'kind': o.kind, 'size': o.size,
+                    'kind': o.kind, 'format': '0x%04x' % o.format_code,
+                    'size': o.size, 'storage': '0x%08x' % o.storage_id,
                     'date': o.capture_date.isoformat() if o.capture_date else None}
                    for o in objects]
         print(json.dumps(payload, ensure_ascii=False, indent=1))
         return 0
-    print('%d objetos:' % len(objects))
-    for obj in objects:
-        print(describe(obj))
+    if args.raw:
+        for sid, objs in per_storage:
+            print('-- storage 0x%08X: %d objetos' % (sid, len(objs)))
+            for obj in objs:
+                print('  0x%08x  fmt=0x%04x %-9s %10s  %s'
+                      % (obj.handle, obj.format_code, obj.kind,
+                         human_size(obj.size), obj.filename))
+    else:
+        print('%d objetos:' % len(objects))
+        for obj in objects:
+            print(describe(obj))
     for kind in ('photo', 'video', 'other'):
         count = sum(1 for o in objects if o.kind == kind)
         if count:
             total = sum(o.size for o in objects if o.kind == kind)
             print('%s: %d (%s)' % (kind, count, human_size(total)))
+    others = [o for o in objects
+              if o.kind == 'other' and o.format_code != ptp.FMT_Association]
+    if others and not args.raw:
+        print('\nObjetos con formato no clasificado (posibles videos con '
+              'format code raro):')
+        for obj in others[:20]:
+            print('  0x%08x  fmt=0x%04x  %s' % (obj.handle, obj.format_code,
+                                                obj.filename))
     return 0
 
 

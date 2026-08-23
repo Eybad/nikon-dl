@@ -169,15 +169,16 @@ def get_object_info_retry(session, handle, max_wait=5.0, interval=0.25):
         time.sleep(interval)
 
 
-def list_objects(session, storage_id):
-    """Objetos de un storage, sin carpetas (Association)."""
+def list_objects(session, storage_id, include_associations=False):
+    """Objetos de un storage. Las carpetas (Association) se filtran salvo
+    con include_associations=True (diagnostico de enumeracion)."""
     res = session.transaction(ptp.OP_GetObjectHandles, [storage_id, 0, 0])
     res.expect_ok()
     handles, _ = parse_u32_array(res.data, 0)
     objects = []
     for handle in handles:
         obj = get_object_info_retry(session, handle)
-        if obj.format_code == ptp.FMT_Association:
+        if obj.format_code == ptp.FMT_Association and not include_associations:
             continue
         objects.append(obj)
     return objects
