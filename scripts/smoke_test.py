@@ -35,9 +35,20 @@ def fail(stage, exc, hint):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ip', default='192.168.1.1')
+    parser.add_argument('--rw-timeout', type=float, default=5.0,
+                        help='timeout lectura/escritura en s (default 5; '
+                             'subilo a 15 si el INIT tarda en responder)')
+    parser.add_argument('--debug', action='store_true',
+                        help='vuelca cada frame MTP-IP en hexadecimal')
     args = parser.parse_args()
 
-    session = CameraSession(ip=args.ip)
+    if args.debug:
+        from nikon_dl.transport import configure_debug, hexdump
+        configure_debug(lambda d, t, b: sys.stderr.write(
+            '--- %s %s (%d bytes)\n%s\n'
+            % (d, ptp.CONTAINER_NAMES.get(t, '0x%02x' % t), len(b), hexdump(b))))
+
+    session = CameraSession(ip=args.ip, rw_timeout=args.rw_timeout)
     ok = True
 
     # --- Etapa A: TCP ---
