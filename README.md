@@ -1,109 +1,110 @@
 # nikon-dl
 
-Cliente CLI en Python 3 (stdlib only) para descargar **fotos y videos** del
-Nikon Coolpix S3700 por Wi-Fi (protocolo MTP-IP / PTP-IP, puerto TCP 15740),
-directamente a un celular con Termux. La app oficial Wireless Mobile Utility
-(WMU) excluye explicitamente a la S3700 de la descarga de video; este cliente
-habla el protocolo directamente.
+Descargá fotos **y videos** de tu Nikon Coolpix S3700 por Wi-Fi directo al celular, sin PC y sin la app oficial.
 
-Implementacion propia a partir de especificaciones publicas (CIPA DC-007 /
-PIMA 15470 / MTP) y quirks de firmware Nikon documentados. Sin codigo de
-terceros. Licencia MIT.
+`nikon-dl` es un CLI en Python puro (stdlib, cero dependencias) que habla el protocolo MTP-IP de las cámaras Nikon Wi-Fi directamente desde Termux. Existe porque la app Wireless Mobile Utility de Nikon [excluye explícitamente a la S3700 de la descarga de video](https://downloadcenter.nikonimglib.com/en/download/sw/197.html) — este cliente no tiene esa limitación.
+
+## Características
+
+- **Fotos y videos**: descarga JPEG y AVI (Motion-JPEG), clasificados automáticamente
+- **Descarga incremental**: el manifest `.nikon-dl-manifest.json` evita re-bajar lo ya descargado (`--new`, default)
+- **Resume real**: ante caída de Wi-Fi continúa desde donde cortó gracias a los `.part` y `GetPartialObject` con offset
+- **Reconexión automática**: hasta 3 reconexiones por archivo sin perder progreso
+- **Verificación**: tamaño contra ObjectInfo + magic bytes (JPEG/AVI) antes de confirmar cada archivo
+- **Borrado fail-closed**: dry-run por defecto; `--delete-after` solo borra lo descargado y verificado en esa misma corrida
+- **Modo debug**: `--debug` vuelca todo el tráfico MTP-IP en hexadecimal para diagnosticar
 
 ## Requisitos
 
-- Python 3.8+ (probado con 3.14 en Termux). Sin dependencias externas.
-- El telefono conectado al AP Wi-Fi de la camara.
+- Python 3.8+ (probado en Termux con 3.14)
+- Teléfono conectado al AP Wi-Fi de la cámara
 
-## Conexion Wi-Fi (paso manual en Android)
+Sin dependencias externas: solo stdlib (`socket`, `struct`, `argparse`, `json`).
 
-1. En la camara: activar Wi-Fi (menu de reproduccion -> boton Wi-Fi).
-2. En Android: Ajustes > Wi-Fi > conectar al AP `Nikon_...`.
-3. Cuando Android avise "red sin internet", elegir **mantener conexion**
-   (o desactivar "cambiar automaticamente a datos moviles").
-4. En Termux, antes de transferencias largas:
-   ```
-   termux-wake-lock
-   ```
-   y mantener la pantalla encendida para que Android no duerma el proceso.
+## Puesta en marcha
 
-La IP de la camara es `192.168.1.1` (default del firmware).
+1. En la cámara: menú de reproducción → botón **Wi-Fi**
+2. En Android: conectate al AP `Nikon_...`
+3. Cuando avise "red sin internet", elegí **mantener conexión**
+
+> [!TIP]
+> Antes de transferencias largas corré `termux-wake-lock` y dejá la pantalla encendida: si Android duerme el proceso o cambia a datos móviles, se corta la transferencia (aunque el resume te salva).
+
+### Primera vez: smoke test
+
+Validá el enlace contra la cámara física antes de usar el CLI completo:
+
+```sh
+python scripts/smoke_test.py
+```
+
+Reporta por etapas: **A** TCP connect → **B** handshake INIT/session ID → **C** sesión completa (probe, OpenSession, GetDeviceInfo, storages, objetos). Si una etapa falla, indica hasta dónde llegó y una pista de recuperación.
 
 ## Uso
 
-```bash
-# desde la raiz del proyecto
-python -m nikon_dl list                       # enumera fotos/videos en la camara
-python -m nikon_dl download                   # baja lo nuevo (incremental)
-python -m nikon_dl download --all --out DIR   # baja todo
-python -m nikon_dl download --type video      # solo videos (AVI)
-python -m nikon_dl download --delete-after    # baja + verifica + borra de la camara
-python -m nikon_dl delete                     # dry-run: lista lo que borraria
-python -m nikon_dl delete --handles 0x0009 --yes
+```sh
+python -m nikon_dl list                        # qué hay en la cámara
+python -m nikon_dl download                    # baja lo nuevo (incremental)
+python -m nikon_dl download --type video       # solo videos
+python -m nikon_dl download --all -o ~/storage/downloads
+python -m nikon_dl download --delete-after     # baja, verifica y libera la tarjeta
+python -m nikon_dl delete                      # dry-run del borrado
+python -m nikon_dl delete --older-than 20260101 --yes
 ```
 
-Flags utiles:
+Los archivos bajan por defecto a `~/storage/downloads` (si existe) o a `./nikon-dl-descargas`.
 
-- `--ip` : IP de la camara (default `192.168.1.1`).
-- `--debug` : vuelca en hexadecimal todo el trafico MTP-IP.
-- `download --new` (default): usa `.nikon-dl-manifest.json` en el directorio
-  de salida para no re-bajar archivos ya descargados.
+| Comando | Descripción |
+|---|---|
+| `list [--json]` | Enumera fotos/videos con handle, tamaño y fecha |
+| `download` | Descarga incremental (`--all` fuerza todo, `--type photo\|video\|all`) |
+| `delete` | Borra de la cámara (`--handles`, `--older-than AAAAMMDD`, `--type`; exige `--yes`) |
 
-## Smoke test (primera vez)
+Flags globales: `--ip` (default `192.168.1.1`), `--port` (default `15740`), `--debug`.
 
-Antes de usar el CLI completo, validar el enlace contra la camara fisica:
+> [!WARNING]
+> El borrado en la cámara es irreversible. `delete` siempre hace dry-run salvo que pases `--yes`, y `--delete-after` nunca borra archivos cuya verificación falló.
 
-```bash
-python scripts/smoke_test.py [--ip 192.168.1.1]
+## Cómo funciona
+
+La cámara expone un servidor MTP-IP (PTP/IP, CIPA DC-007) en `192.168.1.1:15740`. El cliente abre dos sockets (comandos + eventos), hace el handshake con probe obligatorio, abre sesión y transfiere con `GetPartialObject` en chunks de 1 MB.
+
+Quirks de firmware Nikon que el código maneja explícitamente:
+
+- `GetObject` se cuelga con archivos grandes (peor con video) → solo `GetPartialObject`
+- `CloseSession` a menos de 1 s de `OpenSession` deja la cámara sorda → gap mínimo garantizado
+- `GetObjectInfo` puede responder `GeneralError` sobre objetos recién creados → retry 5 s
+- Sesión cae tras ~30 s idle → keepalive con `GetDeviceInfo`
+- Algunos modelos rechazan el session ID devuelto → fallback automático a `0x1`
+
+Implementación propia desde especificaciones públicas (CIPA/PIMA/MTP); sin código de terceros, licencia MIT.
+
+## Tests
+
+```sh
+python -m unittest discover -s tests -v
 ```
 
-Reporta por etapas: (a) TCP connect, (b) handshake INIT_CMD_REQ/ACK +
-session ID, (c) sesion completa (eventos + probe + OpenSession +
-GetDeviceInfo). Si falla una etapa, indica hasta donde llego.
-
-## Diseno / quirks Nikon manejados
-
-- Descarga **solo** con `GetPartialObject` en chunks de 1 MB: el firmware
-  Nikon se cuelga con `GetObject` en archivos grandes (peor con video).
-- `CloseSession` nunca se emite a menos de 1 s despues de `OpenSession`
-  (bug: deja a la camara sorda hasta ciclar Wi-Fi).
-- `GetObjectInfo` reintenta ante `GeneralError` hasta 5 s (objetos recien
-  creados).
-- Keepalive con `GetDeviceInfo` cada >=5 s durante esperas largas (la sesion
-  cae tras ~30 s idle).
-- Probe obligatorio en el socket de eventos tras el handshake.
-- Fallback de session ID a `0x1` si la camara rechaza el ID devuelto.
-- Borrado fail-closed: dry-run por defecto; `--delete-after` solo borra
-  objetos descargados y verificados en esa misma corrida.
+La suite corre contra un simulador TCP (`tests/fake_camera.py`) que implementa el protocolo: handshake, probe, errores configurables, cortes de conexión a mitad de transferencia. No necesita la cámara.
 
 ## Estructura
 
 ```
 nikon_dl/
-  transport.py   frames u32 LE length-prefix, timeouts, hexdump debug
-  ptp.py         constantes MTP/PTP-IP (payloads, opcodes, formatos)
-  session.py     handshake 2 sockets, transacciones, keepalive, close seguro
-  objects.py     enumeracion storages/handles, parseo ObjectInfo
-  downloader.py  GetPartialObject chunked, resume .part, verificacion, manifest
-  deleter.py     DeleteObject fail-closed
+├── transport.py   frames u32 LE length-prefix, timeouts, hexdump debug
+├── ptp.py         constantes MTP/PTP-IP (payloads, opcodes, formatos)
+├── session.py     handshake dual-socket, transacciones, close seguro
+├── objects.py     enumeración storages/handles, parseo ObjectInfo
+├── downloader.py  chunks, resume .part, verificación, manifest
+├── deleter.py     borrado fail-closed
+└── cli.py         list / download / delete
 scripts/
-  smoke_test.py  validacion graduada contra la camara real
+└── smoke_test.py  validación graduada contra la cámara real
 tests/
-  fake_camera.py simulador TCP minimo del protocolo (para tests sin hardware)
+└── fake_camera.py simulador MTP-IP para la suite
 ```
-
-## Tests
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-Los tests corren contra un simulador local; no necesitan la camara.
 
 ## Limitaciones conocidas
 
-- La S3700 nunca fue probada por terceros con este protocolo (la Coolpix
-  P340, misma generacion WMU, funciona con parametros default). Si el smoke
-  test no pasa, `--debug` vuelca el trafico para diagnosticar.
-- Velocidad esperada: orden de ~2 MB/s por Wi-Fi (referencia de otros modelos
-  Nikon).
+- La S3700 nunca fue probada por terceros con este protocolo (la Coolpix P340, misma generación WMU, funciona con parámetros default). Si el smoke test no pasa, `--debug` muestra exactamente dónde cortó.
+- Velocidad esperada en el orden de ~2 MB/s por Wi-Fi (referencia de otros modelos Nikon).
