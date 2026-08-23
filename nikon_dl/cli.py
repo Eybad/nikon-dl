@@ -8,6 +8,7 @@ from pathlib import Path
 from . import ptp
 from .deleter import build_deletion_plan, delete_objects
 from .downloader import CHUNK_SIZE, SessionHolder, download_all
+from .netdetect import detect_camera_ip
 from .objects import (
     human_size,
     list_all_objects,
@@ -41,8 +42,9 @@ def build_parser():
         prog='nikon-dl',
         description='Descarga fotos y videos de una Nikon Coolpix Wi-Fi '
                     '(MTP-IP sobre TCP 15740).')
-    parser.add_argument('--ip', default=DEFAULT_HOST,
-                        help='IP de la camara (default %(default)s)')
+    parser.add_argument('--ip', default=None,
+                        help='IP de la camara (default: autodetectada de la '
+                             'red activa; fallback %s)' % DEFAULT_HOST)
     parser.add_argument('--port', type=int, default=DEFAULT_PORT)
     parser.add_argument('--debug', action='store_true',
                         help='vuelca todo el trafico MTP-IP en hexadecimal')
@@ -79,15 +81,17 @@ def build_parser():
 
 def connect_holder(args):
     """Conecta e imprime resumen. Devuelve (SessionHolder, device_info)."""
+    ip = args.ip or detect_camera_ip() or DEFAULT_HOST
+
     def provider():
-        return CameraSession(ip=args.ip, port=args.port).connect()
+        return CameraSession(ip=ip, port=args.port).connect()
 
     holder = SessionHolder(provider=provider)
     session = holder.current()
     info = parse_deviceinfo(session.device_info_raw)
     # a stderr: stdout queda limpio para datos (--json / pipeo)
     print('Conectado a %s:%d | sesion 0x%X | modelo: %s'
-          % (args.ip, args.port, session.session_id,
+          % (ip, args.port, session.session_id,
              info.get('model') or '(desconocido)'), file=sys.stderr)
     return holder, info
 

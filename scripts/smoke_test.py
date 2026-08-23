@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nikon_dl import ptp                                    # noqa: E402
+from nikon_dl.netdetect import detect_camera_ip             # noqa: E402
 from nikon_dl.objects import list_objects, list_storages, parse_deviceinfo  # noqa: E402
 from nikon_dl.session import CameraSession                  # noqa: E402
 
@@ -34,7 +35,8 @@ def fail(stage, exc, hint):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--ip', default='192.168.1.1')
+    parser.add_argument('--ip', default=None,
+                        help='IP de la camara (default: autodetectada)')
     parser.add_argument('--rw-timeout', type=float, default=5.0,
                         help='timeout lectura/escritura en s (default 5; '
                              'subilo a 15 si el INIT tarda en responder)')
@@ -42,20 +44,24 @@ def main():
                         help='vuelca cada frame MTP-IP en hexadecimal')
     args = parser.parse_args()
 
+    ip = args.ip or detect_camera_ip() or '192.168.1.1'
+    if args.ip is None:
+        print('IP autodetectada: %s (--ip para forzar otra)' % ip)
+
     if args.debug:
         from nikon_dl.transport import configure_debug, hexdump
         configure_debug(lambda d, t, b: sys.stderr.write(
             '--- %s %s (%d bytes)\n%s\n'
             % (d, ptp.CONTAINER_NAMES.get(t, '0x%02x' % t), len(b), hexdump(b))))
 
-    session = CameraSession(ip=args.ip, rw_timeout=args.rw_timeout)
+    session = CameraSession(ip=ip, rw_timeout=args.rw_timeout)
     ok = True
 
     # --- Etapa A: TCP ---
     try:
         sock = session._open_socket()
         session._cmd_sock = sock
-        print('PASA [A] TCP connect a %s:%d' % (args.ip, session.port))
+        print('PASA [A] TCP connect a %s:%d' % (ip, session.port))
     except OSError as exc:
         return fail('A/TCP', exc,
                     'el telefono no esta conectado al AP Wi-Fi de la camara '

@@ -54,6 +54,9 @@ python -m nikon_dl delete --older-than 20260101 --yes
 
 Los archivos bajan por defecto a `~/storage/downloads` (si existe) o a `./nikon-dl-descargas`.
 
+> [!NOTE]
+> La IP de la cámara se **auto-detecta** de la red activa (gateway del AP). La S3700 usa la subred `192.168.0.x` — la cámara está en `192.168.0.1`, no en `192.168.1.1` como los Nikon DSLR documentados por Airnef. Forzala con `--ip` si hace falta.
+
 | Comando | Descripción |
 |---|---|
 | `list [--json]` | Enumera fotos/videos con handle, tamaño y fecha |

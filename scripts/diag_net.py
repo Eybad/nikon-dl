@@ -18,6 +18,10 @@ import socket
 import sys
 import time
 
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1]))
+
+from nikon_dl.netdetect import parse_default_gateways  # noqa: E402
+
 
 def source_ip_for(dest_ip):
     """IP de origen que el kernel usaria para llegar a dest_ip.
@@ -81,6 +85,16 @@ def main():
         print('  => %s' % ('sale por la red de la camara: BIEN'
                             if on_camera_net else
                             'NO sale por la red %s.x (datos moviles u otro Wi-Fi?)' % net))
+    try:
+        with open('/proc/net/route', encoding='ascii') as fh:
+            gateways = parse_default_gateways(fh.read())
+    except OSError:
+        gateways = []
+    if gateways:
+        print('  gateways default: %s'
+              % ', '.join('%s via %s' % (i, g) for i, g in gateways))
+        print('  (en la S3700 la camara suele ser el gateway: proba --ip %s)'
+              % gateways[0][1])
 
     print('== Capa 3: TCP connect %s:%d (timeout %.0fs) ==' % (args.ip, args.port, args.timeout))
     result, elapsed = tcp_probe(args.ip, args.port, args.timeout)
