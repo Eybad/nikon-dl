@@ -52,27 +52,44 @@ class ObjectInfoTest(unittest.TestCase):
 
 class DeviceInfoTest(unittest.TestCase):
     def test_parseo_modelo_y_operaciones(self):
-        info = parse_deviceinfo(enc_deviceinfo(model='NIKON COOLPIX S3700'))
-        self.assertEqual(info['model'], 'NIKON COOLPIX S3700')
+        info = parse_deviceinfo(enc_deviceinfo(model='NIKON COOLPIX FAKE'))
+        self.assertEqual(info['model'], 'NIKON COOLPIX FAKE')
         self.assertIn(ptp.OP_GetPartialObject, info['operations_supported'])
         self.assertEqual(info['manufacturer'], 'Nikon')
+
+    def test_valores_reales_capturados_del_s3700_en_campo(self):
+        # valores leidos del InitCmdAck/GetDeviceInfo real (dump de campo
+        # 2026-08-23): fuente de verdad independiente del encoder propio
+        info = parse_deviceinfo(enc_deviceinfo(
+            model='S3700',
+            vendor_ext_desc='microsoft.com/deviceservices: 1.0;',
+            manufacturer='Nikon Corporation',
+            device_version='COOLPIX S3700 V1.0'))
+        self.assertEqual(info['model'], 'S3700')
+        self.assertEqual(info['vendor_extension_id'], 6)  # Microsoft MTP
+        self.assertEqual(info['vendor_extension_desc'],
+                         'microsoft.com/deviceservices: 1.0;')
+        self.assertEqual(info['manufacturer'], 'Nikon Corporation')
+        self.assertEqual(info['device_version'], 'COOLPIX S3700 V1.0')
+        self.assertIn(ptp.OP_GetPartialObject, info['operations_supported'])
+        self.assertIn(ptp.OP_DeleteObject, info['operations_supported'])
 
 
 class PrimitivesTest(unittest.TestCase):
     def test_string_vacia_con_null(self):
-        # count=1: solo el terminador; se consumen 2 bytes (count + null)
-        text, off = parse_ptp_string(b'\x01\x00', 0)
-        self.assertEqual((text, off), ('', 2))
+        # count=1: solo la unidad null UTF-16; se consumen 1 + 2*1 = 3 bytes
+        text, off = parse_ptp_string(b'\x01\x00\x00', 0)
+        self.assertEqual((text, off), ('', 3))
 
     def test_string_varia_sin_payload(self):
         text, off = parse_ptp_string(b'\x00', 0)
         self.assertEqual((text, off), ('', 1))
 
-    def test_string_unicode(self):
-        raw = 'café'.encode('utf-8')
-        data = bytes([len(raw) + 1]) + raw + b'\x00'
+    def test_string_unicode_utf16le_como_el_firmware_real(self):
+        # captura real del S3700: count 0x06 + "S3700" en UTF-16LE + null
+        data = b'\x06' + 'S3700'.encode('utf-16-le') + b'\x00\x00'
         text, off = parse_ptp_string(data, 0)
-        self.assertEqual(text, 'café')
+        self.assertEqual(text, 'S3700')
         self.assertEqual(off, len(data))
 
     def test_arrays_u16_u32(self):

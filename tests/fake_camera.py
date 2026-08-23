@@ -18,8 +18,14 @@ from nikon_dl.transport import ConnectionClosed, recv_frame, send_frame
 # --- encoders de datasets (solo para tests/fake) ---
 
 def enc_str(text):
-    raw = (text or '').encode('utf-8')
-    return bytes([len(raw) + 1]) + raw + b'\x00'
+    """String PTP real: u8 count (unidades INCLUYENDO null) + UTF-16LE.
+
+    Verificado contra el firmware del S3700 en campo: los strings vienen
+    en UTF-16LE ('S3700' = 53 00 33 00 37 00 30 00 30 00), igual que
+    strutil de airnef (stringToUtf16ByteArray).
+    """
+    units = (text or '').encode('utf-16-le')
+    return bytes([len(units) // 2 + 1]) + units + b'\x00\x00'
 
 
 def enc_u16_array(values):
@@ -37,18 +43,21 @@ ALL_OPS = [ptp.OP_GetDeviceInfo, ptp.OP_OpenSession, ptp.OP_CloseSession,
            ptp.OP_DeleteObject, ptp.OP_GetPartialObject]
 
 
-def enc_deviceinfo(model='NIKON COOLPIX FAKE'):
+def enc_deviceinfo(model='NIKON COOLPIX FAKE',
+                   vendor_ext_desc='microsoft.com: 1.0;',
+                   manufacturer='Nikon', device_version='1.0'):
     body = struct.pack('<H', 100)               # StandardVersion
-    body += struct.pack('<I', 0)                # VendorExtensionID
+    body += struct.pack('<I', 6)                # VendorExtensionID (Microsoft)
     body += struct.pack('<H', 100)              # VendorExtensionVersion
-    body += enc_str('microsoft.com: 1.0;')      # VendorExtensionDesc
+    body += enc_str(vendor_ext_desc)            # VendorExtensionDesc
     body += struct.pack('<H', 0)                # FunctionalMode
     body += enc_u16_array(ALL_OPS)              # OperationsSupported
     body += enc_u16_array([])                   # EventsSupported
     body += enc_u16_array([])                   # DevicePropertiesSupported
     body += enc_u16_array([])                   # CaptureFormats
     body += enc_u16_array([ptp.FMT_JPEG_EXIF, ptp.FMT_AVI])
-    body += enc_str('Nikon') + enc_str(model) + enc_str('1.0') + enc_str('SNFAKE001')
+    body += enc_str(manufacturer) + enc_str(model) \
+        + enc_str(device_version) + enc_str('SNFAKE001')
     return body
 
 

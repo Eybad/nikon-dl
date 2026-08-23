@@ -34,19 +34,24 @@ class CameraObject:
 # --- primitivas de parseo ---
 
 def parse_ptp_string(data, off):
-    """Devuelve (texto, nuevo_offset).
+    """String PTP/MTP segun ISO 15740 y firmware real Nikon.
 
-    Layout PTP: u8 cantidad de caracteres INCLUYENDO el null final, seguido
-    por esos bytes (chars + null). Se consumen 1 + count bytes en total.
-    Variante count==0: string vacia sin payload.
+    Layout: u8 cantidad de unidades (INCLUYE el null final) seguido por
+    esas unidades en UTF-16LE. Se consumen 1 + 2*count bytes.
+    Variante count==0: solo el byte de count, sin payload.
+
+    Verificado en campo contra el S3700: 'S3700' llega como
+    06 53 00 33 00 37 00 30 00 30 00 00 00. Airnef hace lo mismo
+    (strutil.stringFromUtf16ByteArray).
     """
     if off >= len(data):
         return '', off
     count = data[off]
     if count == 0:
         return '', off + 1
-    raw = data[off + 1:off + count]
-    return raw.decode('utf-8', errors='replace'), off + 1 + count
+    raw = data[off + 1:off + 1 + 2 * count]
+    text = raw[:2 * (count - 1)].decode('utf-16-le', errors='replace')
+    return text, off + 1 + 2 * count
 
 
 def parse_u16_array(data, off):
